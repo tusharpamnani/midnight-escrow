@@ -81,10 +81,24 @@ export interface WalletContext {
 --------------------------- */
 
 
+// Helper to check if proof server is reachable
+const checkProofServer = async (url: string) => {
+  try {
+    const response = await fetch(url + '/health', { method: 'GET' });
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+  } catch (e: any) {
+    logger.error(`Could not connect to proof server at ${url}: ${e.message}`);
+    throw new Error(`Proof server is not reachable at ${url}. Please verify it is running (e.g. via 'get-proof-server' or 'docker-compose').`);
+  }
+};
+
 export const joinContract = async (
   providers: EscrowProviders,
   contractAddress: string,
 ): Promise<DeployedEscrowContract> => {
+  // @ts-ignore
+  await checkProofServer(providers.proofProvider.baseUrl || 'http://127.0.0.1:6300');
+
   const escrowContract = await findDeployedContract(providers, {
     contractAddress,
     compiledContract: escrowCompiledContract,
@@ -103,17 +117,34 @@ export const deploy = async (
   providers: EscrowProviders,
 ): Promise<DeployedEscrowContract> => {
   logger.info('Deploying escrow contract...');
-  const escrowContract = await deployContract(providers, {
-    compiledContract: escrowCompiledContract,
-    privateStateId: 'escrowPrivateState',
-    initialPrivateState: {
-      secretKey: new Uint8Array(randomBytes(32)),
-      releaseSecret: new Uint8Array(randomBytes(32)),
-      nonce: new Uint8Array(randomBytes(32)),
-    },
-  });
-  logger.info(`Deployed contract at address: ${escrowContract.deployTxData.public.contractAddress}`);
-  return escrowContract;
+
+  // Explicitly check proof server we know from config or providers
+  // Since providers.proofProvider is abstract properly, we might need config context, 
+  // but looking at `configureProviders`, it uses config.proofServer.
+  // We don't have config here easily, but we can guess or try to access it if we exported it?
+  // We imported `contractConfig`.
+  // Let's rely on the error message bubbling up, or try a simple fetch to localhost:6300 if we suspect that's the default.
+  // Actually, let's just use a try/catch block around deployContract with a better error message.
+
+  try {
+    const escrowContract = await deployContract(providers, {
+      compiledContract: escrowCompiledContract,
+      privateStateId: 'escrowPrivateState',
+      initialPrivateState: {
+        secretKey: new Uint8Array(randomBytes(32)),
+        releaseSecret: new Uint8Array(randomBytes(32)),
+        nonce: new Uint8Array(randomBytes(32)),
+      },
+    });
+    logger.info(`Deployed contract at address: ${escrowContract.deployTxData.public.contractAddress}`);
+    return escrowContract;
+  } catch (error: any) {
+    logger.error('Deploy failed details:', error);
+    if (error.message?.includes('Failed to prove') || error.code === 'ECONNREFUSED') {
+      logger.error(' \n!!! HINT: Is the Proof Server running? The CLI expects a proof server at http://127.0.0.1:6300 (default).\n');
+    }
+    throw error;
+  }
 };
 
 /* ---------------------------
