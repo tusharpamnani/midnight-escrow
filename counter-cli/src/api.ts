@@ -41,6 +41,7 @@ import { toHex } from '@midnight-ntwrk/midnight-js-utils';
 import { getNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { Buffer } from 'buffer';
+import { randomBytes } from 'node:crypto';
 
 export interface WalletContext {
   wallet: WalletFacade;
@@ -79,6 +80,7 @@ export interface WalletContext {
    Contract lifecycle
 --------------------------- */
 
+
 export const joinContract = async (
   providers: EscrowProviders,
   contractAddress: string,
@@ -87,7 +89,11 @@ export const joinContract = async (
     contractAddress,
     compiledContract: escrowCompiledContract,
     privateStateId: 'escrowPrivateState',
-    initialPrivateState: {},
+    initialPrivateState: {
+      secretKey: new Uint8Array(randomBytes(32)),
+      releaseSecret: new Uint8Array(randomBytes(32)),
+      nonce: new Uint8Array(randomBytes(32)),
+    },
   });
   logger.info(`Joined contract at address: ${escrowContract.deployTxData.public.contractAddress}`);
   return escrowContract;
@@ -100,7 +106,11 @@ export const deploy = async (
   const escrowContract = await deployContract(providers, {
     compiledContract: escrowCompiledContract,
     privateStateId: 'escrowPrivateState',
-    initialPrivateState: {},
+    initialPrivateState: {
+      secretKey: new Uint8Array(randomBytes(32)),
+      releaseSecret: new Uint8Array(randomBytes(32)),
+      nonce: new Uint8Array(randomBytes(32)),
+    },
   });
   logger.info(`Deployed contract at address: ${escrowContract.deployTxData.public.contractAddress}`);
   return escrowContract;
