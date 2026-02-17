@@ -60,12 +60,9 @@ globalThis.WebSocket = WebSocket;
 --------------------------- */
 
 const escrowCompiledContract = CompiledContract.make('escrow', Escrow.Contract).pipe(
-  CompiledContract.withVacantWitnesses,
+  CompiledContract.withWitnesses(witnesses),
   CompiledContract.withCompiledFileAssets(contractConfig.zkConfigPath),
 );
-
-console.log('Witnesses object:', witnesses);
-console.log('Type of secretKey:', typeof witnesses?.secretKey);
 
 /* ---------------------------
    Wallet types
