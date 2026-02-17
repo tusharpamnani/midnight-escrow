@@ -60,7 +60,7 @@ globalThis.WebSocket = WebSocket;
 --------------------------- */
 
 const escrowCompiledContract = CompiledContract.make('escrow', Escrow.Contract).pipe(
-  CompiledContract.withWitnesses(witnesses),
+  CompiledContract.withVacantWitnesses,
   CompiledContract.withCompiledFileAssets(contractConfig.zkConfigPath),
 );
 
