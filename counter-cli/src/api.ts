@@ -66,7 +66,6 @@ const escrowCompiledContract = CompiledContract.make('escrow', Escrow.Contract).
 
 console.log('Witnesses object:', witnesses);
 console.log('Type of secretKey:', typeof witnesses?.secretKey);
-export const escrowContractInstance: EscrowContract = new Escrow.Contract(witnesses);
 
 /* ---------------------------
    Wallet types
