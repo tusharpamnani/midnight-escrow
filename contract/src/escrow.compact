@@ -1,0 +1,133 @@
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+
+enum EscrowState {
+  EMPTY,
+  FUNDED,
+  RELEASED,
+  REFUNDED
+}
+
+// Public ledger state
+export ledger buyer: Bytes<32>;
+export ledger seller: Bytes<32>;
+export ledger termsCommitment: Bytes<32>;
+export ledger state: EscrowState;
+export ledger round: Counter;
+
+// -------------------------------------
+// Witnesses (private inputs)
+// -------------------------------------
+
+witness secretKey(): Bytes<32>;
+witness releaseSecret(): Bytes<32>;
+witness nonce(): Bytes<32>;
+
+// -------------------------------------
+// Helper circuit
+// -------------------------------------
+
+circuit deriveKey(r: Field, sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+    [pad(32, "midnight:escrow:key"), r as Bytes<32>, sk]
+  );
+}
+
+// -------------------------------------
+// Constructor
+// -------------------------------------
+
+constructor() {
+  state = EscrowState.EMPTY;
+}
+
+// -------------------------------------
+// Create escrow (buyer)
+// -------------------------------------
+
+export circuit createEscrow(
+  sellerPk: Bytes<32>,
+  amount: Uint<64>,
+  releaseHash: Bytes<32>
+): [] {
+
+  assert(state == EscrowState.EMPTY, "Escrow already exists");
+
+  const sk = secretKey();
+  const pk = deriveKey(round, sk);
+
+  const n = nonce();
+
+  // commitment to hidden terms
+  const termsCommit = persistentCommit<Vector<2, Bytes<32>>>(
+    [amount as Bytes<32>, releaseHash],
+    n
+  );
+
+  buyer = disclose(pk);
+  seller = disclose(sellerPk);
+  termsCommitment = disclose(termsCommit);
+
+  state = EscrowState.FUNDED;
+}
+
+// -------------------------------------
+// Accept escrow (seller)
+// -------------------------------------
+
+export circuit acceptEscrow(): [] {
+  assert(state == EscrowState.FUNDED, "Escrow not funded");
+
+  const sk = secretKey();
+  const pk = deriveKey(round, sk);
+
+  assert(pk == seller, "Only seller can accept");
+}
+
+// -------------------------------------
+// Release funds (seller proves secret)
+// -------------------------------------
+
+export circuit release(): [] {
+  assert(state == EscrowState.FUNDED, "Invalid state");
+
+  const sk = secretKey();
+  const pk = deriveKey(round, sk);
+
+  assert(pk == seller, "Only seller can release");
+
+  const secret = releaseSecret();
+  const n = nonce();
+
+  const secretHash = persistentHash<Bytes<32>>(secret);
+
+  const recomputed = persistentCommit<Vector<2, Bytes<32>>>(
+    [0 as Bytes<32>, secretHash],
+    n
+  );
+
+  assert(
+    recomputed == termsCommitment,
+    "Invalid release proof"
+  );
+
+  state = EscrowState.RELEASED;
+  round.increment(1);
+}
+
+// -------------------------------------
+// Refund (buyer)
+// -------------------------------------
+
+export circuit refund(): [] {
+  assert(state == EscrowState.FUNDED, "Invalid state");
+
+  const sk = secretKey();
+  const pk = deriveKey(round, sk);
+
+  assert(pk == buyer, "Only buyer can refund");
+
+  state = EscrowState.REFUNDED;
+  round.increment(1);
+}
