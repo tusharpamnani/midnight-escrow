@@ -1,4 +1,5 @@
 import { type WalletContext } from './api';
+import { Buffer } from 'buffer';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface, type Interface } from 'node:readline/promises';
 import { type Logger } from 'pino';
@@ -6,6 +7,8 @@ import { type StartedDockerComposeEnvironment, type DockerComposeEnvironment } f
 import { type EscrowProviders, type DeployedEscrowContract } from './common-types';
 import { type Config, StandaloneConfig } from './config';
 import * as api from './api';
+import { MidnightBech32m, ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
+import { getNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 
 let logger: Logger;
 
@@ -93,7 +96,7 @@ const joinContract = async (
 
 const startDustMonitor = async (wallet: api.WalletContext['wallet'], rli: Interface): Promise<void> => {
   console.log('');
-  const stopPromise = rli.question('  Press Enter to return to menu...\n').then(() => {});
+  const stopPromise = rli.question('  Press Enter to return to menu...\n').then(() => { });
   await api.monitorDustBalance(wallet, stopPromise);
   console.log('');
 };
@@ -143,6 +146,96 @@ const deployOrJoin = async (
   }
 };
 
+const interactionMenu = (dustBalance: string) => `
+${DIVIDER}
+  Contract Interaction${dustBalance ? `                  DUST: ${dustBalance}` : ''}
+${DIVIDER}
+  [1] Create Escrow (Buyer)
+  [2] Accept Escrow (Seller)
+  [3] Release Funds (Seller)
+  [4] Refund (Buyer)
+  [5] Monitor DUST balance
+  [6] Disconnect
+${'─'.repeat(62)}
+> `;
+
+const interactionLoop = async (
+  providers: EscrowProviders,
+  walletCtx: api.WalletContext,
+  contract: DeployedEscrowContract,
+  rli: Interface,
+): Promise<void> => {
+  while (true) {
+    const dustLabel = await getDustLabel(walletCtx.wallet);
+    const choice = await rli.question(interactionMenu(dustLabel));
+
+    try {
+      switch (choice.trim()) {
+        case '1': {
+          const sellerPkInput = await rli.question('Enter Seller Public Key (hex or bech32m shielded address): ');
+          const amountStr = await rli.question('Enter Amount (tNight/DUST units): ');
+
+          let sellerPk: Buffer;
+
+          if (sellerPkInput.startsWith('mn_')) {
+            try {
+              const mb32 = MidnightBech32m.parse(sellerPkInput);
+              // We need valid network ID.
+              // We can get it from api.getNetworkId or just pass what parse returns if logic allows.
+              // ShieldedAddress.codec.decode requires networkId.
+              const networkId = getNetworkId();
+              const address = ShieldedAddress.codec.decode(networkId, mb32);
+
+              // We assume escrow uses Encryption Public Key for the seller identity
+              sellerPk = Buffer.from(address.encryptionPublicKey.data);
+            } catch (e) {
+              console.log(`  ✗ Invalid bech32m address: ${e instanceof Error ? e.message : String(e)}`);
+              continue;
+            }
+          } else {
+            sellerPk = Buffer.from(sellerPkInput.replace(/^0x/, ''), 'hex');
+          }
+
+          const amount = BigInt(amountStr);
+
+          console.log('Note: Secret must be exactly 32 bytes (64 hex chars).');
+          const secretHex = await rli.question('Enter Release Secret (32 bytes hex): ');
+          const secretBytes = Buffer.from(secretHex.replace(/^0x/, ''), 'hex');
+
+          if (secretBytes.length !== 32) throw new Error(`Secret must be 32 bytes, got ${secretBytes.length}`);
+          if (sellerPk.length !== 32) throw new Error(`Seller PK must be 32 bytes, got ${sellerPk.length}`);
+
+          console.log(`  Using Seller PK (Encryption Key): ${sellerPk.toString('hex')}`);
+
+          await api.withStatus('Creating Escrow', () =>
+            api.createEscrow(providers, contract, sellerPk, amount, secretBytes)
+          );
+          break;
+        }
+        case '2':
+          await api.withStatus('Accepting Escrow', () => api.acceptEscrow(providers, contract));
+          break;
+        case '3':
+          await api.withStatus('Releasing Funds', () => api.release(providers, contract));
+          break;
+        case '4':
+          await api.withStatus('Refunding', () => api.refund(providers, contract));
+          break;
+        case '5':
+          await startDustMonitor(walletCtx.wallet, rli);
+          break;
+        case '6':
+          return;
+        default:
+          console.log(`  Invalid choice: ${choice}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.log(`  ✗ Error: ${msg}\n`);
+    }
+  }
+};
+
 const mainLoop = async (
   providers: EscrowProviders,
   walletCtx: api.WalletContext,
@@ -154,9 +247,10 @@ const mainLoop = async (
   console.log(`
 ${DIVIDER}
   Escrow contract ready.
-  Interaction flows (create/accept/release) will be added next.
 ${DIVIDER}
 `);
+
+  await interactionLoop(providers, walletCtx, escrowContract, rli);
 };
 
 /* ─── Docker Mapping ─────────────────────────────────────── */

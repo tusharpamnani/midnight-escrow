@@ -6,6 +6,7 @@ export type EscrowPrivateState = {
   secretKey: Uint8Array;
   releaseSecret: Uint8Array;
   nonce: Uint8Array;
+  amount: bigint;
 };
 
 // Correct synchronous Compact witness definitions
@@ -29,5 +30,12 @@ export const witnesses = {
   ): [EscrowPrivateState, Uint8Array] {
     const state = context.privateState;
     return [state, state.nonce];
+  },
+
+  escrowAmount(
+    context: WitnessContext<Ledger, EscrowPrivateState>
+  ): [EscrowPrivateState, bigint] {
+    const state = context.privateState;
+    return [state, state.amount];
   },
 };

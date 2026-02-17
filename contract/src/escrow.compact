@@ -23,6 +23,7 @@ export ledger round: Counter;
 witness secretKey(): Bytes<32>;
 witness releaseSecret(): Bytes<32>;
 witness nonce(): Bytes<32>;
+witness escrowAmount(): Uint<64>;
 
 // -------------------------------------
 // Helper circuit
@@ -32,6 +33,10 @@ circuit deriveKey(r: Field, sk: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<3, Bytes<32>>>(
     [pad(32, "midnight:escrow:key"), r as Bytes<32>, sk]
   );
+}
+
+export circuit getReleaseHash(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Bytes<32>>(secret);
 }
 
 // -------------------------------------
@@ -48,8 +53,7 @@ constructor() {
 
 export circuit createEscrow(
   sellerPk: Bytes<32>,
-  amount: Uint<64>,
-  releaseHash: Bytes<32>
+  amount: Uint<64>
 ): [] {
 
   assert(state == EscrowState.EMPTY, "Escrow already exists");
@@ -58,6 +62,8 @@ export circuit createEscrow(
   const pk = deriveKey(round, sk);
 
   const n = nonce();
+  const secret = releaseSecret();
+  const releaseHash = persistentHash<Bytes<32>>(secret);
 
   // commitment to hidden terms
   const termsCommit = persistentCommit<Vector<2, Bytes<32>>>(
@@ -99,11 +105,12 @@ export circuit release(): [] {
 
   const secret = releaseSecret();
   const n = nonce();
+  const amt = escrowAmount();
 
   const secretHash = persistentHash<Bytes<32>>(secret);
 
   const recomputed = persistentCommit<Vector<2, Bytes<32>>>(
-    [0 as Bytes<32>, secretHash],
+    [amt as Bytes<32>, secretHash],
     n
   );
 
