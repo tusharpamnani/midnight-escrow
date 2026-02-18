@@ -127,9 +127,10 @@ const deployOrJoin = async (
       case '2':
         try {
           return await joinContract(providers, rli);
-        } catch (e) {
+        } catch (e: any) {
           const msg = e instanceof Error ? e.message : String(e);
           console.log(`  ✗ Failed to join contract: ${msg}\n`);
+          if (e.stack) console.log(e.stack);
         }
         break;
 
@@ -155,7 +156,8 @@ ${DIVIDER}
   [3] Release Funds (Seller)
   [4] Refund (Buyer)
   [5] Monitor DUST balance
-  [6] Disconnect
+  [6] Show My Escrow Identity (Share with Buyer)
+  [7] Disconnect
 ${'─'.repeat(62)}
 > `;
 
@@ -188,8 +190,11 @@ const interactionLoop = async (
 
               // We assume escrow uses Encryption Public Key for the seller identity
               sellerPk = Buffer.from(address.encryptionPublicKey.data);
-            } catch (e) {
-              console.log(`  ✗ Invalid bech32m address: ${e instanceof Error ? e.message : String(e)}`);
+            } catch (e: any) {
+              console.log(`  ✗ Failed: ${e.message}`);
+              // Print stack trace for debugging
+              if (e.stack) console.log(`\n  Stack Trace:\n  ${e.stack}\n`);
+              if (e.cause) console.log(`  Cause: ${e.cause}\n`);
               continue;
             }
           } else {
@@ -202,21 +207,34 @@ const interactionLoop = async (
           const secretHex = await rli.question('Enter Release Secret (32 bytes hex): ');
           const secretBytes = Buffer.from(secretHex.replace(/^0x/, ''), 'hex');
 
-          if (secretBytes.length !== 32) throw new Error(`Secret must be 32 bytes, got ${secretBytes.length}`);
-          if (sellerPk.length !== 32) throw new Error(`Seller PK must be 32 bytes, got ${sellerPk.length}`);
+          if (secretBytes.length !== 32) throw new Error(`Secret must be 32 bytes.`);
+          if (sellerPk.length !== 32) throw new Error(`Seller PK must be 32 bytes.`);
 
           console.log(`  Using Seller PK (Encryption Key): ${sellerPk.toString('hex')}`);
 
-          await api.withStatus('Creating Escrow', () =>
-            api.createEscrow(providers, contract, sellerPk, amount, secretBytes)
-          );
+          await api.withStatus('Creating Escrow', async () => {
+            const nonce = await api.createEscrow(providers, contract, sellerPk, amount, secretBytes);
+            console.log(`\n  Escrow Created!\n  Please share the following NONCE and SECRET with the Seller (required for release):\n  NONCE (hex): ${Buffer.from(nonce).toString('hex')}\n  SECRET (hex): ${secretBytes.toString('hex')}\n`);
+          });
           break;
         }
         case '2':
           await api.withStatus('Accepting Escrow', () => api.acceptEscrow(providers, contract));
           break;
         case '3':
-          await api.withStatus('Releasing Funds', () => api.release(providers, contract));
+          console.log('Enter the parameters provided by Buyer:');
+          const rAmountStr = await rli.question('Amount: ');
+          const rSecretHex = await rli.question('Secret (hex): ');
+          const rNonceHex = await rli.question('Nonce (hex): ');
+
+          const rAmount = BigInt(rAmountStr);
+          const rSecretBytes = Buffer.from(rSecretHex.replace(/^0x/, ''), 'hex');
+          const rNonceBytes = Buffer.from(rNonceHex.replace(/^0x/, ''), 'hex');
+
+          if (rSecretBytes.length !== 32) throw new Error(`Secret must be 32 bytes.`);
+          if (rNonceBytes.length !== 32) throw new Error(`Nonce must be 32 bytes.`);
+
+          await api.withStatus('Releasing Funds', () => api.release(providers, contract, rSecretBytes, rNonceBytes, rAmount));
           break;
         case '4':
           await api.withStatus('Refunding', () => api.refund(providers, contract));
@@ -224,7 +242,12 @@ const interactionLoop = async (
         case '5':
           await startDustMonitor(walletCtx.wallet, rli);
           break;
-        case '6':
+        case '6': {
+          const pk = await api.getEscrowPublicKey();
+          console.log(`\n  Your Escrow Public Key (Share this with Buyer):\n  ${pk}\n`);
+          break;
+        }
+        case '7':
           return;
         default:
           console.log(`  Invalid choice: ${choice}`);

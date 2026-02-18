@@ -92,14 +92,6 @@ const checkProofServer = async (url: string) => {
   }
 };
 
-const updatePrivateState = async (providers: EscrowProviders, newState: Partial<EscrowPrivateState>) => {
-  const currentState = await providers.privateStateProvider.get('escrowPrivateState');
-  if (!currentState) {
-    throw new Error('Private state not found. Cannot update.');
-  }
-  await providers.privateStateProvider.set('escrowPrivateState', { ...currentState, ...newState });
-};
-
 export const joinContract = async (
   providers: EscrowProviders,
   contractAddress: string,
@@ -115,18 +107,25 @@ export const joinContract = async (
       secretKey: new Uint8Array(randomBytes(32)),
       releaseSecret: new Uint8Array(randomBytes(32)),
       nonce: new Uint8Array(randomBytes(32)),
-      amount: 0n,
     },
   });
   logger.info(`Joined contract at address: ${escrowContract.deployTxData.public.contractAddress}`);
   return escrowContract;
 };
 
-
 export const deploy = async (
   providers: EscrowProviders,
 ): Promise<DeployedEscrowContract> => {
   logger.info('Deploying escrow contract...');
+
+  // Explicitly check proof server we know from config or providers
+  // Since providers.proofProvider is abstract properly, we might need config context, 
+  // but looking at `configureProviders`, it uses config.proofServer.
+  // We don't have config here easily, but we can guess or try to access it if we exported it?
+  // We imported `contractConfig`.
+  // Let's rely on the error message bubbling up, or try a simple fetch to localhost:6300 if we suspect that's the default.
+  // Actually, let's just use a try/catch block around deployContract with a better error message.
+
   try {
     const escrowContract = await deployContract(providers, {
       compiledContract: escrowCompiledContract,
@@ -135,7 +134,6 @@ export const deploy = async (
         secretKey: new Uint8Array(randomBytes(32)),
         releaseSecret: new Uint8Array(randomBytes(32)),
         nonce: new Uint8Array(randomBytes(32)),
-        amount: 0n,
       },
     });
     logger.info(`Deployed contract at address: ${escrowContract.deployTxData.public.contractAddress}`);
@@ -148,44 +146,6 @@ export const deploy = async (
     throw error;
   }
 };
-
-export const createEscrow = async (
-  providers: EscrowProviders,
-  contract: DeployedEscrowContract,
-  sellerPk: Uint8Array,
-  amount: bigint,
-  secret: Uint8Array,
-): Promise<void> => {
-  const nonce = new Uint8Array(randomBytes(32));
-  await updatePrivateState(providers, {
-    nonce,
-    amount,
-    releaseSecret: secret,
-  });
-
-  logger.info(`Creating escrow with Amount: ${amount}`);
-  const tx = await contract.callTx.createEscrow(sellerPk, amount);
-  logger.info(`Transaction submitted.`);
-};
-
-export const acceptEscrow = async (providers: EscrowProviders, contract: DeployedEscrowContract) => {
-  logger.info('Accepting escrow...');
-  const tx = await contract.callTx.acceptEscrow();
-  logger.info(`Transaction submitted.`);
-};
-
-export const release = async (providers: EscrowProviders, contract: DeployedEscrowContract) => {
-  logger.info('Releasing funds...');
-  const tx = await contract.callTx.release();
-  logger.info(`Transaction submitted.`);
-};
-
-export const refund = async (providers: EscrowProviders, contract: DeployedEscrowContract) => {
-  logger.info('Refunding funds...');
-  const tx = await contract.callTx.refund();
-  logger.info(`Transaction submitted.`);
-};
-
 
 /* ---------------------------
    Wallet helpers
