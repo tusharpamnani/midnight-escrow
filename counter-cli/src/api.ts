@@ -467,6 +467,69 @@ export const monitorDustBalance = async (wallet: WalletFacade, stopSignal: Promi
   process.stdout.write('\n');
 };
 
+export const getEscrowPublicKey = async (ctx: WalletContext): Promise<string> => {
+  const state = await Rx.firstValueFrom(ctx.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
+  return state.shielded.encryptionPublicKey.toHexString();
+};
+
+export const createEscrow = async (
+  providers: EscrowProviders,
+  contract: DeployedEscrowContract,
+  sellerPk: Buffer,
+  amount: bigint,
+  secretBytes: Buffer,
+): Promise<Uint8Array> => {
+  logger.info("Initializing escrow...");
+  const nonce = randomBytes(32);
+
+  const currentState = await providers.privateStateProvider.get('escrowPrivateState');
+  await providers.privateStateProvider.set('escrowPrivateState', {
+    secretKey: currentState?.secretKey ?? new Uint8Array(32),
+    nonce: new Uint8Array(nonce),
+    releaseSecret: new Uint8Array(secretBytes),
+    amount,
+  });
+
+  const tx = await contract.callTx.createEscrow(
+    new Uint8Array(sellerPk),
+    amount,
+  );
+
+  logger.info(`Transaction submitted.`);
+  return nonce;
+};
+
+export const acceptEscrow = async (providers: EscrowProviders, contract: DeployedEscrowContract) => {
+  logger.info('Accepting escrow...');
+  const tx = await contract.callTx.acceptEscrow();
+  logger.info('Transaction submitted.');
+};
+
+export const release = async (
+  providers: EscrowProviders,
+  contract: DeployedEscrowContract,
+  rSecretBytes: Buffer,
+  rNonceBytes: Buffer,
+  rAmount: bigint,
+) => {
+  logger.info('Releasing funds...');
+  const currentState = await providers.privateStateProvider.get('escrowPrivateState');
+  await providers.privateStateProvider.set('escrowPrivateState', {
+    secretKey: currentState?.secretKey ?? new Uint8Array(32),
+    releaseSecret: new Uint8Array(rSecretBytes),
+    nonce: new Uint8Array(rNonceBytes),
+    amount: rAmount,
+  });
+  const tx = await contract.callTx.release();
+  logger.info(`Transaction submitted.`);
+};
+
+export const refund = async (providers: EscrowProviders, contract: DeployedEscrowContract) => {
+  logger.info('Refunding funds...');
+  const tx = await contract.callTx.refund();
+  logger.info(`Transaction submitted.`);
+};
+
 export function setLogger(_logger: Logger) {
   logger = _logger;
 }

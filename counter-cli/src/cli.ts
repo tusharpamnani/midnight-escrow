@@ -243,7 +243,7 @@ const interactionLoop = async (
           await startDustMonitor(walletCtx.wallet, rli);
           break;
         case '6': {
-          const pk = await api.getEscrowPublicKey();
+          const pk = await api.getEscrowPublicKey(walletCtx);
           console.log(`\n  Your Escrow Public Key (Share this with Buyer):\n  ${pk}\n`);
           break;
         }
