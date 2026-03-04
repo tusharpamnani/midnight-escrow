@@ -33,7 +33,11 @@ This project demonstrates a privacy-preserving Escrow contract on the Midnight N
     ```bash
     npm install
     ```
-3.  Build the project:
+3. Compile the contract:
+    ```bash
+    cd contract && npm run compact
+    ``` 
+4.  Build the project:
     ```bash
     cd contract && npm run build
     cd ../counter-cli && npm run build
