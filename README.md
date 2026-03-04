@@ -1,127 +1,431 @@
 # Midnight Escrow Contract
 
-This project demonstrates a privacy-preserving Escrow contract on the Midnight Network. It enables a Buyer to deposit funds securely, which are released to a Seller only when specific conditions are met (providing a secret).
+[![Compact Runtime](https://img.shields.io/badge/compact--runtime-0.14.0-1abc9c.svg)](https://shields.io/) [![midnight-js](https://img.shields.io/badge/midnight--js-3.0.0-blueviolet.svg)](https://shields.io/) [![wallet-sdk](https://img.shields.io/badge/wallet--sdk-1.0.0-blue.svg)](https://shields.io/) [![Tests](https://img.shields.io/badge/Tests-50%20passing-brightgreen.svg)](https://shields.io/)
 
-## Features
+A **privacy-preserving escrow contract built on the Midnight Network**. A buyer deposits funds which are released to a seller only when the seller proves knowledge of a secret agreed upon at escrow creation — verified entirely by a Zero-Knowledge Proof, with no trusted intermediary.
 
-*   **Stable Identity**: Uses a persistent, deterministic identity system (`escrow-identity.json`) separate from your Midnight wallet address.
-*   **Privacy-Preserving**: Contract logic uses Zero-Knowledge Proofs (ZKPs) to verify the Seller's identity and the release secret without revealing them on the public ledger unnecessarily.
-*   **Interactive CLI**: A full-featured command-line interface for Deploying, Joining, Funding, and Releasing escrows.
+The project serves as a **reference implementation** for developers building privacy-preserving financial primitives on Midnight.
 
-## Project Structure
+---
 
-*   **`contract/`**: Compact smart contract source code.
-    *   `src/escrow.compact`: The Escrow logic.
-*   **`counter-cli/`**: The client application.
-    *   `src/api.ts`: API for Midnight interaction.
-    *   `src/cli.ts`: Interactive menu.
+# Overview
 
-## Getting Started
+Traditional escrow systems require a trusted third party. This implementation replaces that trust with cryptography.
 
-### Prerequisites
+The contract enforces the following rules in ZK:
 
-*   Node.js (v18+)
-*   Docker (for the local Proof Server)
-*   Network: Midnight Preprod
+* Only the key derived from the buyer's secret key can create or refund an escrow
+* Only the key derived from the seller's secret key can accept or release an escrow
+* Release is only permitted when the seller can prove they hold the correct `(releaseSecret, nonce, amount)` triple that matches the commitment stored on-chain at creation time
 
-**⚠️ IMPORTANT:** The CLI uses a local LevelDB database for your private state. To support switching between Alice and Bob on the same machine, the code has been updated to use unique database sessions for every run. However, please **Only run ONE CLI instance at a time**.
+No secret values are ever written to the public ledger. All verification happens inside ZK circuits compiled from the Compact contract.
 
-### Installation
+---
 
-1.  Clone the repository.
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-3. Compile the contract:
-    ```bash
-    cd contract && npm run compact
-    ``` 
-4.  Build the project:
-    ```bash
-    cd contract && npm run build
-    cd ../counter-cli && npm run build
-    ```
+# Demo
 
-### Running the CLI (Recommended Workflow)
+▶️ **YouTube Demo:**
+*(COMING SOON)*
 
-To simulate Alice and Bob efficiently, run the Proof Server separately so it stays alive while you switch CLI sessions.
+The demo shows:
 
-1.  **Start the Proof Server** (Terminal 1):
-    ```bash
-    cd counter-cli
-    docker compose -f proof-server.yml up
-    ```
-    *Wait until you see "Actix runtime found; starting in Actix runtime". Keep this terminal open.*
+1. Contract deployment on Midnight Preprod
+2. Escrow creation by buyer (Bob)
+3. Escrow acceptance by seller (Alice)
+4. Secret-based conditional release
+5. Funds claimed by Alice
 
-2.  **Run the Escrow CLI** (Terminal 2):
-    ```bash
-    cd counter-cli
-    npm run preprod
-    ```
-    *This starts the interactive menu.*
+---
 
-## 🧪 Test Data for Alice & Bob Protocol
+# Features
 
-Use these seeds to simulate the two parties.
+### Zero-Knowledge Release Verification
 
-### 👩 Alice (Seller / Deployer)
-*   **Seed Phrase**: `57bb166cb6bbf3a6cb5e93a26043e3e2d3c830b63b85286fe97619456a2a23f2`
-*   **Role**: Deploys the contract, Provides Identity, Claims Funds.
+At creation the buyer commits to `persistentCommit([amount_bytes || hash(releaseSecret)], nonce)`. At release the seller must reproduce this commitment exactly, proving they have the correct secret and nonce — without revealing either value on the ledger.
 
-### 👨 Bob (Buyer / Creator)
-*   **Seed Phrase**: `2b477c42d95b5eb49222b25f9e5267c44cb15bef9646f086248bff24f43e727f`
-*   **Role**: Funds the escrow, Sets the conditions.
-*   **Test Release Secret**: `4f8c2a9d7b1e3c5a8d6f2e9a1c4b7d8e5f3a9c2d6b1e4f8a7c9d2e5b6a1f3c4a`
-*   **Test Contract Address**: `715a495d864a7e5eb90ae5506a554c9611dc8fe820d93430362b226978b3466c`
-*   **Test Escrow Public Key**: `21bb9c3bd544a09743e0b0e345a42e582c627b73fc36588761ca745f4254a0d4`
+### Derived Identity Keys
 
-> **Note**: The following values are examples from a successful run. When you run Phase 2 (Bob), the CLI will generate a **new, unique Nonce** for you.
->
-> *   **Example Nonce**: `850028d7962d977c6f9c1e6b5106c5ef0be359eb59ea890c02a9fb073febe9fa`
-> *   **Example Secret**: `4f8c2a9d7b1e3c5a8d6f2e9a1c4b7d8e5f3a9c2d6b1e4f8a7c9d2e5b6a1f3c4a`
+Participant identities (`buyer`, `seller` ledger fields) are **derived public keys**: `persistentHash(["midnight:escrow:key", secretKey])`. Raw secret keys are never disclosed on-chain.
 
+### Privacy-Preserving State Machine
 
-## Usage Flow (Step-by-Step)
+The contract enforces a strict four-state machine:
 
-This demo simulates a transaction between Alice and Bob. Follow these steps sequentially in **Terminal 2**.
+```
+EMPTY → FUNDED → RELEASED
+                → REFUNDED
+```
 
-### Phase 1: Setup (Alice)
-1.  **Start CLI**: `npm run preprod`.
-2.  **Wallet**: Restore using **Alice's Seed**.
-3.  **[1] Deploy new escrow contract**: The CLI will deploy a fresh contract.
-    *   **Copy the Contract Address**.
-4.  **[6] Show My Escrow Identity**:
-    *   **Copy your Escrow Public Key**.
-5.  **Exit** the CLI (Option [7] or Ctrl+C).
+Every circuit asserts the current state before acting, preventing double-spend and invalid transitions.
 
-### Phase 2: Funding (Bob)
-1.  **Start CLI**: `npm run preprod`.
-2.  **Wallet**: Restore using **Bob's Seed**.
-3.  **[2] Join existing escrow contract**: Paste the Contract Address (from Phase 1).
-4.  **[1] Create Escrow (Buyer)**:
-    *   **Seller Public Key**: Paste **Alice's Escrow Public Key** (from Phase 1).
-    *   **Amount**: Enter `100` (or any amount).
-    *   **Release Secret**: Paste the **Test Release Secret**.
-5.  **Action**: The CLI will print a **NONCE** (automatically generated) and confirm the Secret.
-    *   **COPY BOTH THE NONCE AND SECRET.** You must share them with Alice.
-6.  **Exit** the CLI.
+### Interactive CLI
 
-### Phase 3: Release (Alice)
-1.  **Start CLI**: `npm run preprod`.
-2.  **Wallet**: Restore using **Alice's Seed**.
-3.  **[2] Join existing escrow contract**: Paste the Contract Address.
-4.  **[2] Accept Escrow (Seller)**: Confirms you are the designated seller.
-5.  **[3] Release Funds (Seller)**:
-    *   **Prompt**: Enter the **Amount**, **Secret**, and **Nonce** provided by Bob.
-6.  **Success!**: The funds are released to Alice's wallet.
+A full-featured CLI supports all escrow operations with an interactive menu:
 
-## Troubleshooting
+* Deploy new escrow contract
+* Join existing escrow contract by address
+* Create escrow (buyer)
+* Accept escrow (seller)
+* Release funds with secret proof (seller)
+* Refund (buyer)
+* Monitor DUST balance
+* Show escrow identity (encryption public key)
 
-*   **`Failed to join contract`**: Ensure you have exited the previous CLI session completely. The updated code creates a new private state session for each run to avoid conflicts.
-*   **`Only seller can accept`**: Bob probably funded the contract using Alice's *Wallet Address* instead of her *Escrow Identity Key*. Ensure Option 6 key is used.
-*   **Refunding**: If Bob made a mistake (e.g., failed to copy the Nonce), log in as Bob and use **[4] Refund** to reclaim funds.
+### Isolated Private State Per Run
 
-## License
+Each CLI session uses a randomly suffixed LevelDB store name (`escrow-private-state-<random>`), preventing decryption failures when switching wallet seeds between runs.
 
-Apache-2.0
+---
+
+# Project Structure
+
+```
+.
+├── contract/                          # Midnight Compact smart contract
+│   ├── src/
+│   │   ├── escrow.compact             # Contract logic (circuits, state machine)
+│   │   ├── witnesses.ts               # ZK witness definitions (EscrowPrivateState)
+│   │   ├── index.ts                   # Package entry point
+│   │   └── test/
+│   │       ├── escrow-simulator.ts    # In-process contract simulator
+│   │       └── escrow.test.ts         # 50 unit tests (Vitest)
+│   │   └── managed/escrow/            # Compact compiler output (generated)
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── counter-cli/                       # CLI client
+│   ├── src/
+│   │   ├── api.ts                     # Wallet, provider setup, contract calls
+│   │   ├── cli.ts                     # Interactive menu and user flows
+│   │   ├── config.ts                  # Network configs (Preprod, Preview, Standalone)
+│   │   ├── common-types.ts            # Shared TypeScript types
+│   │   ├── logger-utils.ts            # Pino logger (file + pretty stdout)
+│   │   ├── preprod.ts                 # Preprod entry point
+│   │   ├── preprod-start-proof-server.ts
+│   │   ├── preview.ts                 # Preview network entry point
+│   │   ├── preview-start-proof-server.ts
+│   │   └── standalone.ts              # Standalone / local entry point
+│   ├── proof-server.yml               # Docker Compose: proof server only
+│   ├── standalone.yml                 # Docker Compose: full local stack
+│   └── package.json
+│
+├── package.json                       # npm workspace root
+├── package-lock.json
+└── README.md
+```
+
+---
+
+# Architecture
+
+## Components
+
+### 1. Compact Smart Contract (`contract/src/escrow.compact`)
+
+Written in Midnight's **Compact language**. Defines:
+
+* **Ledger state**: `buyer`, `seller` (derived keys), `termsCommitment`, `state` (enum), `round` (counter)
+* **Witnesses**: `secretKey`, `releaseSecret`, `nonce`, `escrowAmount` (supplied privately per circuit call)
+* **Circuits**: `createEscrow`, `acceptEscrow`, `release`, `refund`, `getReleaseHash`
+
+### 2. Witness Layer (`contract/src/witnesses.ts`)
+
+Defines `EscrowPrivateState`:
+
+```typescript
+type EscrowPrivateState = {
+  secretKey: Uint8Array;      // 32 bytes — identity key
+  releaseSecret: Uint8Array;  // 32 bytes — pre-image of the commitment
+  nonce: Uint8Array;          // 32 bytes — commitment randomness
+  amount: bigint;             // escrow value
+}
+```
+
+Witness functions feed private state into ZK circuits at proof time.
+
+### 3. CLI Client (`counter-cli/src/`)
+
+* **`api.ts`** — builds the wallet (HD keys → shielded + unshielded + dust sub-wallets), configures providers, and wraps each contract circuit call
+* **`cli.ts`** — interactive readline menu
+* **`config.ts`** — `PreprodConfig`, `PreviewConfig`, `StandaloneConfig` for different networks
+
+### 4. Proof Server
+
+A local Docker service (`midnightntwrk/proof-server:7.0.0`) that generates ZK proofs. Runs at `http://127.0.0.1:6300`.
+
+### 5. Midnight Network (Preprod / Preview)
+
+Verifies ZK proofs and stores contract state on-chain. The CLI connects via indexer GraphQL and an RPC node.
+
+---
+
+## Architecture Diagram
+
+![architecture](image.png)
+
+---
+
+## Contract State Machine
+
+```
+             createEscrow(sellerPk, amount)
+  [EMPTY] ──────────────────────────────────► [FUNDED]
+                                                  │
+                              ┌───────────────────┴───────────────────┐
+                              │                                       │
+                    release()  │                             refund()  │
+                  (seller + ZK proof)                     (buyer only) │
+                              ▼                                       ▼
+                          [RELEASED]                            [REFUNDED]
+```
+
+All transitions assert the current state. Invalid transitions (e.g. release on REFUNDED, double-release) throw a circuit assertion error.
+
+---
+
+## ZK Commitment Scheme
+
+On `createEscrow`, the buyer stores:
+
+```
+termsCommitment = persistentCommit([amount_as_bytes32 || hash(releaseSecret)], nonce)
+```
+
+On `release`, the seller recomputes:
+
+```
+recomputed = persistentCommit([amount_as_bytes32 || hash(releaseSecret)], nonce)
+assert(recomputed == termsCommitment)
+```
+
+This is fully verified inside the ZK circuit; the seller's `releaseSecret` and `nonce` are private witness inputs that never appear on the public ledger.
+
+---
+
+# Getting Started
+
+## Prerequisites
+
+* Node.js (v18+)
+* Docker (for the Proof Server)
+* Access to the Midnight Preprod faucet
+
+> ⚠️ **Important**: Each CLI run creates a fresh isolated LevelDB private state store. Run only **one CLI session at a time** to avoid port/resource conflicts.
+
+---
+
+## Installation
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/tusharpamnani/midnight-escrow.git
+cd midnight-escrow
+npm install
+```
+
+### 2. Compile the contract
+
+```bash
+cd contract
+npm run compact
+```
+
+This generates `contract/src/managed/escrow/` from `escrow.compact`.
+
+### 3. Build
+
+```bash
+cd contract && npm run build
+cd ../counter-cli && npm run build
+```
+
+### 4. Run tests
+
+```bash
+cd contract
+npm run test
+```
+
+Expected output: **50 tests passing** across 6 test groups.
+
+---
+
+# Running the CLI
+
+## Step 1 — Start the Proof Server (Terminal 1)
+
+```bash
+cd counter-cli
+docker compose -f proof-server.yml up
+```
+
+Wait for:
+
+```
+Actix runtime found; starting in Actix runtime
+```
+
+Keep this terminal running throughout the session.
+
+## Step 2 — Run the CLI (Terminal 2)
+
+```bash
+cd counter-cli
+npm run preprod
+```
+
+The CLI will prompt you to create or restore a wallet, then show the interactive escrow menu.
+
+> **Alternative networks:**
+> ```bash
+> npm run preview     # Midnight Preview network
+> npm run standalone  # Local Docker stack (requires standalone.yml)
+> ```
+
+---
+
+# Test Data for Alice & Bob
+
+> ⚠️ **For testing only. Never use these seeds on mainnet.**
+
+## Alice — Seller / Deployer
+
+```
+seed: 57bb166cb6bbf3a6cb5e93a26043e3e2d3c830b63b85286fe97619456a2a23f2
+```
+
+Role: deploys the contract, provides escrow identity, accepts and releases funds.
+
+## Bob — Buyer / Funder
+
+```
+seed: 2b477c42d95b5eb49222b25f9e5267c44cb15bef9646f086248bff24f43e727f
+```
+
+Role: funds the escrow, defines the release secret.
+
+```
+test release secret: 4f8c2a9d7b1e3c5a8d6f2e9a1c4b7d8e5f3a9c2d6b1e4f8a7c9d2e5b6a1f3c4a
+```
+
+---
+
+# Usage Flow
+
+## Phase 1 — Deploy (Alice)
+
+```
+npm run preprod
+```
+
+1. Choose **[2] Restore wallet from seed** → enter Alice's seed
+2. Wait for wallet sync and DUST generation
+3. Choose **[1] Deploy new escrow contract** — copy the printed contract address
+4. Choose **[6] Show My Escrow Identity** — copy the printed encryption public key
+5. Exit with **[7] Disconnect**
+
+---
+
+## Phase 2 — Fund Escrow (Bob)
+
+```
+npm run preprod
+```
+
+1. Choose **[2] Restore wallet from seed** → enter Bob's seed
+2. Wait for wallet sync and DUST generation
+3. Choose **[2] Join existing escrow contract** → paste Alice's contract address
+4. Choose **[1] Create Escrow (Buyer)**:
+   - Paste Alice's **escrow public key** (encryption key from Phase 1)
+   - Enter an amount
+   - Enter the test release secret (64 hex chars)
+5. The CLI prints a **NONCE** — share both the nonce and secret with Alice
+6. Exit with **[7] Disconnect**
+
+---
+
+## Phase 3 — Release Funds (Alice)
+
+```
+npm run preprod
+```
+
+1. Choose **[2] Restore wallet from seed** → enter Alice's seed
+2. Choose **[2] Join existing escrow contract** → paste the contract address
+3. Choose **[2] Accept Escrow (Seller)** — verifies Alice is the designated seller
+4. Choose **[3] Release Funds (Seller)**:
+   - Enter the amount, secret, and nonce Bob provided
+5. The ZK proof is generated and submitted — funds are released to Alice
+
+---
+
+## Refund Path (Bob)
+
+If Alice never accepts, Bob can reclaim the escrow:
+
+```
+[4] Refund
+```
+
+---
+
+# Testing
+
+The contract has a comprehensive Vitest test suite with **50 unit tests** covering all contract behaviour without requiring a network or proof server.
+
+```bash
+cd contract && npm run test
+```
+
+| Group | Tests | Coverage |
+|---|---|---|
+| **deployment** | 4 | Initial state, field defaults, determinism |
+| **escrow lifecycle** | 8 | All state transitions, ledger field correctness, full end-to-end |
+| **access control** | 6 | Buyer/seller/third-party role enforcement |
+| **secret & nonce validation** | 6 | Wrong secret, wrong nonce, wrong amount, `getReleaseHash` |
+| **invalid operations** | 10 | Double-release, double-refund, cross-state calls, re-creation |
+| **edge cases** | 8 | Zero amount, u64 max, commitment uniqueness, key derivation |
+| **multi-actor simulation** | 8 | Full Alice & Bob protocol, impersonation, Charlie takeover attempts |
+
+---
+
+# Troubleshooting
+
+### `Unsupported state or unable to authenticate data` on join
+
+This means the local LevelDB store was encrypted with a different wallet seed. This is handled automatically — each CLI run uses a fresh store. If you still see this error, delete any `midnight-level-db` or `midnight-db-*` directories in `counter-cli/` and restart.
+
+### `Failed to join contract`
+
+Ensure the previous CLI session has fully exited before starting a new one.
+
+### `Only seller can accept`
+
+Bob used Alice's **wallet address** instead of her **escrow identity key**. Use option **[6] Show My Escrow Identity** in Alice's session to get the correct encryption public key.
+
+### `Invalid release proof`
+
+The secret, nonce, or amount does not match the commitment stored at creation. Verify Bob shared the correct values.
+
+### Proof server not reachable
+
+Ensure `docker compose -f proof-server.yml up` is running and you see the `Actix runtime found` message before starting the CLI.
+
+### Wallet has no DUST
+
+DUST is generated from `tNight` (unshielded) tokens. Fund the wallet from the [Midnight Preprod faucet](https://faucet.preprod.midnight.network/) and wait for DUST generation to complete before interacting with contracts.
+
+---
+
+# Future Improvements
+
+Possible extensions include:
+
+* timeout-based escrow refunds
+* multi-party escrow agreements
+* private dispute resolution
+* integration with privacy-preserving DeFi primitives
+* confidential liquidity pools and AMMs
+
+---

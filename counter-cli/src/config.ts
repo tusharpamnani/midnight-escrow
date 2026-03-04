@@ -14,11 +14,12 @@
 // limitations under the License.
 
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 export const currentDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
 export const contractConfig = {
-  privateStateStoreName: 'escrow-private-state',
+  privateStateStoreName: `escrow-private-state-${randomBytes(8).toString('hex')}`,
   zkConfigPath: path.resolve(currentDir, '..', '..', 'contract', 'src', 'managed', 'escrow'),
 };
 
